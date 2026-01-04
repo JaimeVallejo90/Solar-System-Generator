@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Solar System Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Share+Tech+Mono&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="hero">
+        <div class="hero-copy">
+          <h1>Solar System Generator</h1>
+        </div>
+        <div class="hero-actions">
+          <div class="seed-field">
+            <label for="seed-input">Seed</label>
+            <input id="seed-input" type="text" placeholder="random" />
+          </div>
+          <button class="btn" id="generate">Generate system</button>
+          <div class="system-id" id="seed-display">Seed: -</div>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="viz">
+          <div class="viz-header">
+            <div class="meta">
+              <div class="meta-title">Stars</div>
+              <div class="meta-value" id="star-summary">-</div>
+            </div>
+            <div class="meta">
+              <div class="meta-title">Orbital bodies</div>
+              <div class="meta-value" id="body-count">-</div>
+            </div>
+            <div class="meta">
+              <div class="meta-title">Rolls</div>
+              <div class="meta-value" id="roll-count">-</div>
+            </div>
+          </div>
+
+          <div class="map-shell">
+            <svg
+              id="system-map"
+              viewBox="0 0 1000 1000"
+              role="img"
+              aria-label="Solar system map"
+            ></svg>
+          </div>
+
+          <div class="legend">
+            <div class="legend-item">
+              <span class="legend-swatch hot"></span>
+              Hot band
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch temperate"></span>
+              Temperate band
+            </div>
+            <div class="legend-item">
+              <span class="legend-swatch cold"></span>
+              Cold band
+            </div>
+            <div class="legend-item">
+              <span class="legend-icon rocky"></span>
+              Rocky planet
+            </div>
+            <div class="legend-item">
+              <span class="legend-icon gas"></span>
+              Gas giant
+            </div>
+            <div class="legend-item">
+              <span class="legend-icon belt"></span>
+              Asteroid belt
+            </div>
+          </div>
+
+          <div class="strip">
+            <div class="strip-title">Orbital line</div>
+            <div class="strip-line">
+              <div class="strip-connector" aria-hidden="true"></div>
+              <div class="strip-sun-stack">
+                <div class="strip-sun" id="strip-sun" aria-label="Primary star"></div>
+                <div
+                  class="strip-secondary"
+                  id="strip-secondary"
+                  aria-label="Secondary stars"
+                ></div>
+              </div>
+              <div class="strip-track">
+                <div class="strip-dots" id="system-strip"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="details">
+          <div class="details-header">
+            <h2>System details</h2>
+          </div>
+          <div id="details"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
