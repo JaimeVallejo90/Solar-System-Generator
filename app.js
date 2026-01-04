@@ -526,7 +526,7 @@ const rollStarCount = () => {
 
 const rollMajorBodyCount = () => rollD6() + 2;
 const rollSmallMoonCount = () => Math.floor((rollD6() - 1) / 2);
-const rollGasGiantElementCount = () => rollD6() + 3;
+const rollGasGiantElementCount = () => rollD6() + 2;
 const rollMajorAsteroidCount = () => rollD6() - 1;
 
 const bandKeyFromRoll = (roll) => {
@@ -831,7 +831,7 @@ const renderBeltCloud = (body, center) => {
     })
     .join("");
 
-  return `<g class="belt-cloud belt-cloud--${bandClass}">${scatterMarkup}${majorMarkup}</g>`;
+  return `<g class="belt-cloud belt-cloud--${bandClass} focus-dim" data-focus-id="${body.id}">${scatterMarkup}${majorMarkup}</g>`;
 };
 
 const renderSatellites = (body, x, y) => {
@@ -992,7 +992,7 @@ const renderMap = (system) => {
         return "";
       }
       const bandClass = body.bandKey.toLowerCase();
-      return `<circle class="orbit orbit--${bandClass}" cx="${center}" cy="${center}" r="${body.orbitRadius.toFixed(
+      return `<circle class="orbit orbit--${bandClass} focus-dim" data-focus-id="${body.id}" cx="${center}" cy="${center}" r="${body.orbitRadius.toFixed(
         2
       )}" />`;
     })
@@ -1029,7 +1029,7 @@ const renderMap = (system) => {
 
       if (body.typeKey === "rocky") {
         return `
-          <g class="body body--rocky body--${bandClass}">
+          <g class="body body--rocky body--${bandClass} focus-dim" data-focus-id="${body.id}">
             ${satellites}
             <circle class="planet-core" cx="${x.toFixed(
               1
@@ -1043,7 +1043,7 @@ const renderMap = (system) => {
 
       if (body.typeKey === "gas") {
         return `
-          <g class="body body--gas body--${bandClass}">
+          <g class="body body--gas body--${bandClass} focus-dim" data-focus-id="${body.id}">
             ${satellites}
             <circle class="gas-core" cx="${x.toFixed(1)}" cy="${y.toFixed(
           1
@@ -1059,7 +1059,7 @@ const renderMap = (system) => {
       }
 
       return `
-        <g class="body body--belt body--${bandClass}">
+        <g class="body body--belt body--${bandClass} focus-dim" data-focus-id="${body.id}">
           <circle class="belt-marker belt-marker--ring" cx="${x.toFixed(
             1
           )}" cy="${y.toFixed(1)}" r="7" />
@@ -1248,9 +1248,9 @@ const renderStripBody = (body) => {
     ? `<div class="strip-stem"></div><div class="strip-subdots">${subDots.join("")}</div>`
     : "";
 
-  return `<div class="strip-body${
+  return `<div class="strip-body focus-dim${
     hasSubs ? " strip-body--subs" : ""
-  }">${mainMarkup}${subHtml}</div>`;
+  }" data-focus-id="${body.id}">${mainMarkup}${subHtml}</div>`;
 };
 
 const renderStrip = (system) => {
@@ -1505,6 +1505,52 @@ const renderDetails = (system) => {
   });
 };
 
+let activeFocusId = "";
+
+const updateFocusState = (focusId) => {
+  if (focusId === activeFocusId) {
+    return;
+  }
+  activeFocusId = focusId || "";
+  const focusables = document.querySelectorAll("[data-focus-id]");
+  focusables.forEach((el) => {
+    const isMatch = activeFocusId !== "" && el.dataset.focusId === activeFocusId;
+    el.classList.toggle("is-focused", isMatch);
+    el.classList.toggle("is-dimmed", activeFocusId !== "" && !isMatch);
+  });
+};
+
+const setupHoverFocus = () => {
+  document.addEventListener("pointerover", (event) => {
+    const target = event.target.closest("[data-focus-id]");
+    if (target) {
+      updateFocusState(target.dataset.focusId);
+    }
+  });
+
+  document.addEventListener("pointerout", (event) => {
+    const from = event.target.closest("[data-focus-id]");
+    if (!from) {
+      return;
+    }
+    const to = event.relatedTarget?.closest?.("[data-focus-id]");
+    if (to && to.dataset.focusId === from.dataset.focusId) {
+      return;
+    }
+    if (to) {
+      updateFocusState(to.dataset.focusId);
+    } else {
+      updateFocusState("");
+    }
+  });
+};
+
+const buildShareLink = () => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("seed", currentSeed);
+  return url.toString();
+};
+
 const renderSystem = (system) => {
   const primary = system.starsOrdered[0];
   const starLabel = `${system.stars.length} star${
@@ -1515,6 +1561,12 @@ const renderSystem = (system) => {
   if (seedDisplay) {
     seedDisplay.textContent = `Seed: ${currentSeed}`;
     seedDisplay.classList.toggle("seed-random", currentSeedIsRandom);
+  }
+
+  const shareOutput = document.getElementById("share-output");
+  if (shareOutput) {
+    shareOutput.textContent = "Link: -";
+    shareOutput.classList.remove("is-visible");
   }
 
   const rollDisplay = document.getElementById("roll-count");
@@ -1533,6 +1585,14 @@ const renderSystem = (system) => {
 const init = () => {
   const button = document.getElementById("generate");
   const seedInput = document.getElementById("seed-input");
+  const shareButton = document.getElementById("share-link");
+  const shareOutput = document.getElementById("share-output");
+
+  const params = new URLSearchParams(window.location.search);
+  const seedFromUrl = params.get("seed");
+  if (seedInput && seedFromUrl) {
+    seedInput.value = seedFromUrl;
+  }
 
   const generateFromInput = () => {
     const seedValue = seedInput ? seedInput.value : "";
@@ -1545,8 +1605,27 @@ const init = () => {
   };
 
   generateFromInput();
+  setupHoverFocus();
 
   button.addEventListener("click", generateFromInput);
+  if (shareButton) {
+    shareButton.addEventListener("click", async () => {
+      const url = buildShareLink();
+      let copied = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(url);
+          copied = true;
+        } catch (error) {
+          copied = false;
+        }
+      }
+      if (shareOutput) {
+        shareOutput.classList.add("is-visible");
+        shareOutput.innerHTML = `${copied ? "Copied" : "Link"}: <a href="${url}" target="_blank" rel="noreferrer">${url}</a>`;
+      }
+    });
+  }
   if (seedInput) {
     seedInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {

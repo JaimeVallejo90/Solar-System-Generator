@@ -24,6 +24,10 @@
             <input id="seed-input" type="text" placeholder="random" />
           </div>
           <button class="btn" id="generate">Generate system</button>
+          <button class="btn btn-secondary" id="share-link" type="button">
+            Share link
+          </button>
+          <div class="share-output" id="share-output">Link: -</div>
           <div class="system-id" id="seed-display">Seed: -</div>
         </div>
       </header>
@@ -54,30 +58,38 @@
             ></svg>
           </div>
 
-          <div class="legend">
-            <div class="legend-item">
-              <span class="legend-swatch hot"></span>
-              Hot band
-            </div>
-            <div class="legend-item">
-              <span class="legend-swatch temperate"></span>
-              Temperate band
-            </div>
-            <div class="legend-item">
-              <span class="legend-swatch cold"></span>
-              Cold band
-            </div>
-            <div class="legend-item">
-              <span class="legend-icon rocky"></span>
-              Rocky planet
-            </div>
-            <div class="legend-item">
-              <span class="legend-icon gas"></span>
-              Gas giant
-            </div>
-            <div class="legend-item">
-              <span class="legend-icon belt"></span>
-              Asteroid belt
+          <div class="legend-shell">
+            <button class="legend-toggle" type="button" aria-label="Legend">
+              Legend
+              <span class="legend-toggle-icon">?</span>
+            </button>
+            <div class="legend-popover" role="dialog" aria-label="Legend">
+              <div class="legend">
+                <div class="legend-item">
+                  <span class="legend-swatch hot"></span>
+                  Hot band
+                </div>
+                <div class="legend-item">
+                  <span class="legend-swatch temperate"></span>
+                  Temperate band
+                </div>
+                <div class="legend-item">
+                  <span class="legend-swatch cold"></span>
+                  Cold band
+                </div>
+                <div class="legend-item">
+                  <span class="legend-icon rocky"></span>
+                  Rocky planet
+                </div>
+                <div class="legend-item">
+                  <span class="legend-icon gas"></span>
+                  Gas giant
+                </div>
+                <div class="legend-item">
+                  <span class="legend-icon belt"></span>
+                  Asteroid belt
+                </div>
+              </div>
             </div>
           </div>
 
