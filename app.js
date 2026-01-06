@@ -774,6 +774,7 @@ const generateSystem = () => {
 };
 
 const starRadius = (sizeRank) => 14 + sizeRank * 4;
+const bodyRadiusFor = (body) => (body.typeKey === "gas" ? 20 : 11);
 
 const starOffsets = (count) => {
   if (count === 1) {
@@ -790,6 +791,137 @@ const starOffsets = (count) => {
     [52, -32],
     [-40, 36],
   ];
+};
+
+const buildMinorLightingDefs = (lightId, shadeId, x, y, radius, nx, ny) => {
+  const lightFx = x + nx * radius * 0.5;
+  const lightFy = y + ny * radius * 0.5;
+  const lightR = radius * 1.6;
+  const shadeStartX = x + nx * radius * 0.9;
+  const shadeStartY = y + ny * radius * 0.9;
+  const shadeEndX = x - nx * radius * 0.9;
+  const shadeEndY = y - ny * radius * 0.9;
+
+  return `
+    <radialGradient id="${lightId}" gradientUnits="userSpaceOnUse" cx="${x.toFixed(
+      1
+    )}" cy="${y.toFixed(1)}" fx="${lightFx.toFixed(1)}" fy="${lightFy.toFixed(
+      1
+    )}" r="${lightR.toFixed(1)}">
+      <stop offset="0%" stop-color="rgb(255, 255, 255)" stop-opacity="0.5" />
+      <stop offset="45%" stop-color="rgb(255, 255, 255)" stop-opacity="0.15" />
+      <stop offset="100%" stop-color="rgb(255, 255, 255)" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="${shadeId}" gradientUnits="userSpaceOnUse" x1="${shadeStartX.toFixed(
+      1
+    )}" y1="${shadeStartY.toFixed(1)}" x2="${shadeEndX.toFixed(
+      1
+    )}" y2="${shadeEndY.toFixed(1)}">
+      <stop offset="0%" stop-color="rgb(0, 0, 0)" stop-opacity="0" />
+      <stop offset="60%" stop-color="rgb(0, 0, 0)" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="rgb(0, 0, 0)" stop-opacity="0.45" />
+    </linearGradient>
+  `;
+};
+
+const buildSatelliteLayout = (body, x, y) => {
+  if (body.typeKey === "rocky") {
+    const moons = body.rocky?.smallMoons || [];
+    if (moons.length === 0) {
+      return null;
+    }
+    const baseRadius = 16;
+    const maxRadius = 36;
+    const step =
+      moons.length > 1
+        ? clamp((maxRadius - baseRadius) / (moons.length - 1), 6, 10)
+        : 0;
+    const items = moons.map((moon, index) => {
+      const orbitRadius = baseRadius + index * step;
+      const angle =
+        moon.orbitAngle ?? (moon.orbitAngle = rand() * TAU);
+      const mx = x + Math.cos(angle) * orbitRadius;
+      const my = y + Math.sin(angle) * orbitRadius;
+      return {
+        kind: "small",
+        orbitRadius,
+        orbitClass: "satellite-orbit",
+        x: mx,
+        y: my,
+        radius: 2.4,
+        moonClass: "satellite-body satellite-body--small",
+      };
+    });
+    return { items };
+  }
+
+  if (body.typeKey === "gas") {
+    const elements = [];
+    body.gas.rings.forEach((ring) =>
+      elements.push({ kind: "ring", empty: ring.empty })
+    );
+    body.gas.smallMoons.forEach((moon) =>
+      elements.push({ kind: "small", moon })
+    );
+    body.gas.majorMoons.forEach((moon) =>
+      elements.push({ kind: "major", moon })
+    );
+
+    if (elements.length === 0) {
+      return null;
+    }
+
+    const baseRadius = 26;
+    const maxRadius = 78;
+    const step =
+      elements.length > 1
+        ? clamp((maxRadius - baseRadius) / (elements.length - 1), 6, 12)
+        : 0;
+
+    const items = elements.map((element, index) => {
+      const orbitRadius = baseRadius + index * step;
+      const orbitClass =
+        element.kind === "ring"
+          ? `satellite-orbit satellite-orbit--ring${
+              element.empty ? " satellite-orbit--empty" : ""
+            }`
+          : "satellite-orbit";
+
+      if (element.kind === "ring") {
+        return {
+          kind: "ring",
+          orbitRadius,
+          orbitClass,
+          empty: element.empty,
+        };
+      }
+
+      const moon = element.moon;
+      const angle =
+        moon.orbitAngle ?? (moon.orbitAngle = rand() * TAU);
+      const mx = x + Math.cos(angle) * orbitRadius;
+      const my = y + Math.sin(angle) * orbitRadius;
+      const moonRadius = element.kind === "major" ? 3.4 : 2.6;
+      const moonClass =
+        element.kind === "major"
+          ? "satellite-body satellite-body--major"
+          : "satellite-body satellite-body--small";
+
+      return {
+        kind: element.kind,
+        orbitRadius,
+        orbitClass,
+        x: mx,
+        y: my,
+        radius: moonRadius,
+        moonClass,
+      };
+    });
+
+    return { items };
+  }
+
+  return null;
 };
 
 const renderBeltCloud = (body, center) => {
@@ -814,153 +946,126 @@ const renderBeltCloud = (body, center) => {
     })
     .join("");
 
+  const majorDefs = [];
   const majorMarkup = majors
-    .map((point) => {
+    .map((point, index) => {
       const x = center + Math.cos(point.angle) * point.radius;
       const y = center + Math.sin(point.angle) * point.radius;
-      const tickX = x + Math.cos(point.angle) * 6;
-      const tickY = y + Math.sin(point.angle) * 6;
+      const radius = point.size;
+      const dx = center - x;
+      const dy = center - y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const nx = dx / distance;
+      const ny = dy / distance;
+      const lightId = `asteroid-light-${body.id}-${index + 1}`;
+      const shadeId = `asteroid-shade-${body.id}-${index + 1}`;
+      majorDefs.push(
+        buildMinorLightingDefs(lightId, shadeId, x, y, radius, nx, ny)
+      );
       return `
-        <circle class="asteroid-point asteroid-point--major" cx="${x.toFixed(
-          1
-        )}" cy="${y.toFixed(1)}" r="${point.size.toFixed(2)}" />
-        <line class="asteroid-tick" x1="${x.toFixed(1)}" y1="${y.toFixed(
-          1
-        )}" x2="${tickX.toFixed(1)}" y2="${tickY.toFixed(1)}" />
+        <g class="asteroid-major">
+          <circle class="asteroid-point asteroid-point--major" cx="${x.toFixed(
+            1
+          )}" cy="${y.toFixed(1)}" r="${radius.toFixed(2)}" />
+          <circle class="asteroid-shade" cx="${x.toFixed(
+            1
+          )}" cy="${y.toFixed(1)}" r="${radius.toFixed(
+            2
+          )}" fill="url(#${shadeId})" />
+          <circle class="asteroid-highlight" cx="${x.toFixed(
+            1
+          )}" cy="${y.toFixed(1)}" r="${radius.toFixed(
+            2
+          )}" fill="url(#${lightId})" />
+        </g>
       `;
     })
     .join("");
 
-  return `<g class="belt-cloud belt-cloud--${bandClass} focus-dim" data-focus-id="${body.id}">${scatterMarkup}${majorMarkup}</g>`;
+  const majorDefsMarkup =
+    majorDefs.length > 0 ? `<defs>${majorDefs.join("")}</defs>` : "";
+
+  return `<g class="belt-cloud belt-cloud--${bandClass} focus-dim" data-focus-id="${body.id}">${majorDefsMarkup}${scatterMarkup}${majorMarkup}</g>`;
 };
 
-const renderSatellites = (body, x, y) => {
-  if (body.typeKey === "rocky") {
-    const moons = body.rocky?.smallMoons || [];
-    if (moons.length === 0) {
-      return "";
-    }
-    const baseRadius = 16;
-    const maxRadius = 36;
-    const step =
-      moons.length > 1
-        ? clamp((maxRadius - baseRadius) / (moons.length - 1), 6, 10)
-        : 0;
-    const markup = moons
-      .map((moon, index) => {
-        const orbitRadius = baseRadius + index * step;
-        const angle =
-          moon.orbitAngle ?? (moon.orbitAngle = rand() * TAU);
-        const mx = x + Math.cos(angle) * orbitRadius;
-        const my = y + Math.sin(angle) * orbitRadius;
-        return `
-          <circle class="satellite-orbit" cx="${x.toFixed(
-            1
-          )}" cy="${y.toFixed(1)}" r="${orbitRadius.toFixed(1)}" />
-          <circle class="satellite-body satellite-body--small" cx="${mx.toFixed(
-            1
-          )}" cy="${my.toFixed(1)}" r="2.4" />
-        `;
-      })
-      .join("");
-    return `<g class="satellites">${markup}</g>`;
+const renderSatellites = (body, x, y, center) => {
+  const layout = buildSatelliteLayout(body, x, y);
+  if (!layout) {
+    return "";
   }
 
-  if (body.typeKey === "gas") {
-    const elements = [];
-    body.gas.rings.forEach((ring) =>
-      elements.push({ kind: "ring", empty: ring.empty })
-    );
-    body.gas.smallMoons.forEach((moon) =>
-      elements.push({ kind: "small", moon })
-    );
-    body.gas.majorMoons.forEach((moon) =>
-      elements.push({ kind: "major", moon })
-    );
+  const moonDefs = [];
+  const markup = layout.items
+    .map((item, index) => {
+      const orbitMarkup = `<circle class="${item.orbitClass}" cx="${x.toFixed(
+        1
+      )}" cy="${y.toFixed(1)}" r="${item.orbitRadius.toFixed(1)}" />`;
 
-    if (elements.length === 0) {
-      return "";
-    }
+      if (item.kind === "ring") {
+        return orbitMarkup;
+      }
 
-    const baseRadius = 26;
-    const maxRadius = 78;
-    const step =
-      elements.length > 1
-        ? clamp((maxRadius - baseRadius) / (elements.length - 1), 6, 12)
-        : 0;
+      const dx = center - item.x;
+      const dy = center - item.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const nx = dx / distance;
+      const ny = dy / distance;
+      const moonKey = `${body.id}-${item.kind}-${index + 1}`;
+      const lightId = `moon-light-${moonKey}`;
+      const shadeId = `moon-shade-${moonKey}`;
+      moonDefs.push(
+        buildMinorLightingDefs(
+          lightId,
+          shadeId,
+          item.x,
+          item.y,
+          item.radius,
+          nx,
+          ny
+        )
+      );
+      const sizeClass = item.kind === "major" ? "major" : "small";
+      return `
+        ${orbitMarkup}
+        <g class="satellite satellite--${sizeClass}">
+          <circle class="${item.moonClass}" cx="${item.x.toFixed(
+            1
+          )}" cy="${item.y.toFixed(1)}" r="${item.radius}" />
+          <circle class="satellite-shade" cx="${item.x.toFixed(
+            1
+          )}" cy="${item.y.toFixed(
+            1
+          )}" r="${item.radius}" fill="url(#${shadeId})" />
+          <circle class="satellite-highlight" cx="${item.x.toFixed(
+            1
+          )}" cy="${item.y.toFixed(
+            1
+          )}" r="${item.radius}" fill="url(#${lightId})" />
+        </g>
+      `;
+    })
+    .join("");
 
-    const markup = elements
-      .map((element, index) => {
-        const orbitRadius = baseRadius + index * step;
-        const ringClass =
-          element.kind === "ring"
-            ? `satellite-orbit satellite-orbit--ring${
-                element.empty ? " satellite-orbit--empty" : ""
-              }`
-            : "satellite-orbit";
-        const orbitMarkup = `<circle class="${ringClass}" cx="${x.toFixed(
-          1
-        )}" cy="${y.toFixed(1)}" r="${orbitRadius.toFixed(1)}" />`;
-
-        if (element.kind === "ring") {
-          return orbitMarkup;
-        }
-
-        const moon = element.moon;
-        const angle =
-          moon.orbitAngle ?? (moon.orbitAngle = rand() * TAU);
-        const mx = x + Math.cos(angle) * orbitRadius;
-        const my = y + Math.sin(angle) * orbitRadius;
-        const moonClass =
-          element.kind === "major"
-            ? "satellite-body satellite-body--major"
-            : "satellite-body satellite-body--small";
-        const moonRadius = element.kind === "major" ? 3.4 : 2.6;
-        return `
-          ${orbitMarkup}
-          <circle class="${moonClass}" cx="${mx.toFixed(
-          1
-        )}" cy="${my.toFixed(1)}" r="${moonRadius}" />
-        `;
-      })
-      .join("");
-
-    return `<g class="satellites">${markup}</g>`;
-  }
-
-  return "";
+  const defsMarkup =
+    moonDefs.length > 0 ? `<defs>${moonDefs.join("")}</defs>` : "";
+  return `<g class="satellites">${defsMarkup}${markup}</g>`;
 };
 
 const renderShadows = (bodies, center) => {
   let defsMarkup = "";
   let linesMarkup = "";
 
-  bodies.forEach((body) => {
-    if (body.typeKey !== "rocky" && body.typeKey !== "gas") {
-      return;
-    }
-
-    const angle = body.orbitAngle;
-    const dirX = Math.cos(angle);
-    const dirY = Math.sin(angle);
-    const bodyRadius = body.typeKey === "gas" ? 20 : 11;
-    const length = body.typeKey === "gas" ? 110 : 80;
-    const start = body.orbitRadius + bodyRadius + 6;
-    const end = body.orbitRadius + bodyRadius + length;
-    const x1 = center + dirX * start;
-    const y1 = center + dirY * start;
-    const x2 = center + dirX * end;
-    const y2 = center + dirY * end;
-    const gradId = `shadow-${body.id}`;
-
+  const appendShadow = (id, x1, y1, x2, y2, width, strength = 1) => {
+    const startOpacity = (0.55 * strength).toFixed(2);
+    const midOpacity = (0.18 * strength).toFixed(2);
     defsMarkup += `
-      <linearGradient id="${gradId}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(
+      <linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${x1.toFixed(
         1
       )}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(
         1
       )}" y2="${y2.toFixed(1)}">
-        <stop offset="0%" stop-color="rgb(4, 8, 16)" stop-opacity="0.55" />
-        <stop offset="60%" stop-color="rgb(4, 8, 16)" stop-opacity="0.18" />
+        <stop offset="0%" stop-color="rgb(4, 8, 16)" stop-opacity="${startOpacity}" />
+        <stop offset="60%" stop-color="rgb(4, 8, 16)" stop-opacity="${midOpacity}" />
         <stop offset="100%" stop-color="rgb(4, 8, 16)" stop-opacity="0" />
       </linearGradient>
     `;
@@ -969,15 +1074,143 @@ const renderShadows = (bodies, center) => {
       1
     )}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(
       1
-    )}" stroke="url(#${gradId})" stroke-width="${(
-      bodyRadius * 2
-    ).toFixed(1)}" />`;
+    )}" stroke="url(#${id})" stroke-width="${width.toFixed(1)}" />`;
+  };
+
+  bodies.forEach((body) => {
+    if (body.typeKey === "rocky" || body.typeKey === "gas") {
+      const angle = body.orbitAngle;
+      const dirX = Math.cos(angle);
+      const dirY = Math.sin(angle);
+      const bodyRadius = bodyRadiusFor(body);
+      const length = body.typeKey === "gas" ? 110 : 80;
+      const x = center + dirX * body.orbitRadius;
+      const y = center + dirY * body.orbitRadius;
+      const gradId = `shadow-${body.id}`;
+
+      appendShadow(
+        gradId,
+        x,
+        y,
+        x + dirX * length,
+        y + dirY * length,
+        bodyRadius * 2,
+        1
+      );
+
+      const layout = buildSatelliteLayout(body, x, y);
+      if (layout) {
+        layout.items.forEach((item, index) => {
+          if (item.kind === "ring") {
+            return;
+          }
+          const dx = item.x - center;
+          const dy = item.y - center;
+          const distance = Math.hypot(dx, dy) || 1;
+          const sx = dx / distance;
+          const sy = dy / distance;
+          const moonLength = item.radius * 6 + 4;
+          const moonShadowId = `shadow-${body.id}-sat-${index + 1}`;
+          appendShadow(
+            moonShadowId,
+            item.x,
+            item.y,
+            item.x + sx * moonLength,
+            item.y + sy * moonLength,
+            item.radius * 2,
+            0.6
+          );
+        });
+      }
+    }
+
+    if (body.typeKey === "belt") {
+      if (!body.belt?.majorPoints) {
+        buildBeltScatter(body);
+      }
+      const majors = body.belt?.majorPoints || [];
+      majors.forEach((point, index) => {
+        const x = center + Math.cos(point.angle) * point.radius;
+        const y = center + Math.sin(point.angle) * point.radius;
+        const dx = x - center;
+        const dy = y - center;
+        const distance = Math.hypot(dx, dy) || 1;
+        const dirX = dx / distance;
+        const dirY = dy / distance;
+        const length = point.size * 6 + 4;
+        const shadowId = `shadow-${body.id}-asteroid-${index + 1}`;
+        appendShadow(
+          shadowId,
+          x,
+          y,
+          x + dirX * length,
+          y + dirY * length,
+          point.size * 2,
+          0.5
+        );
+      });
+    }
   });
 
   return {
     defsMarkup,
     linesMarkup,
   };
+};
+
+const renderBodyLighting = (bodies, center) => {
+  let defsMarkup = "";
+
+  bodies.forEach((body) => {
+    if (body.typeKey !== "rocky" && body.typeKey !== "gas") {
+      return;
+    }
+
+    const angle = body.orbitAngle;
+    const x = center + Math.cos(angle) * body.orbitRadius;
+    const y = center + Math.sin(angle) * body.orbitRadius;
+    const radius = bodyRadiusFor(body);
+    const dx = center - x;
+    const dy = center - y;
+    const distance = Math.hypot(dx, dy) || 1;
+    const nx = dx / distance;
+    const ny = dy / distance;
+    const lightId = `light-${body.id}`;
+    const shadeId = `shade-${body.id}`;
+
+    const lightCx = x;
+    const lightCy = y;
+    const lightFx = x + nx * radius * 0.45;
+    const lightFy = y + ny * radius * 0.45;
+    const lightR = radius * 1.15;
+    const shadeStartX = x + nx * radius * 0.9;
+    const shadeStartY = y + ny * radius * 0.9;
+    const shadeEndX = x - nx * radius * 0.9;
+    const shadeEndY = y - ny * radius * 0.9;
+
+    defsMarkup += `
+      <radialGradient id="${lightId}" gradientUnits="userSpaceOnUse" cx="${lightCx.toFixed(
+        1
+      )}" cy="${lightCy.toFixed(1)}" fx="${lightFx.toFixed(
+        1
+      )}" fy="${lightFy.toFixed(1)}" r="${lightR.toFixed(1)}">
+        <stop offset="0%" stop-color="rgb(255, 255, 255)" stop-opacity="0.55" />
+        <stop offset="40%" stop-color="rgb(255, 255, 255)" stop-opacity="0.18" />
+        <stop offset="100%" stop-color="rgb(255, 255, 255)" stop-opacity="0" />
+      </radialGradient>
+      <linearGradient id="${shadeId}" gradientUnits="userSpaceOnUse" x1="${shadeStartX.toFixed(
+        1
+      )}" y1="${shadeStartY.toFixed(1)}" x2="${shadeEndX.toFixed(
+        1
+      )}" y2="${shadeEndY.toFixed(1)}">
+        <stop offset="0%" stop-color="rgb(0, 0, 0)" stop-opacity="0" />
+        <stop offset="60%" stop-color="rgb(0, 0, 0)" stop-opacity="0.2" />
+        <stop offset="100%" stop-color="rgb(0, 0, 0)" stop-opacity="0.5" />
+      </linearGradient>
+    `;
+  });
+
+  return defsMarkup;
 };
 
 const renderMap = (system) => {
@@ -1004,6 +1237,7 @@ const renderMap = (system) => {
     .join("");
 
   const shadowMarkup = renderShadows(bodies, center);
+  const lightingDefs = renderBodyLighting(bodies, center);
 
   const starMarkup = system.starsOrdered
     .map((star, index) => {
@@ -1022,10 +1256,11 @@ const renderMap = (system) => {
       const angle = body.orbitAngle;
       const x = center + Math.cos(angle) * body.orbitRadius;
       const y = center + Math.sin(angle) * body.orbitRadius;
-      const labelX = x + Math.cos(angle) * 24;
-      const labelY = y + Math.sin(angle) * 24;
+      const labelX = x;
+      const labelY = y;
       const bandClass = body.bandKey.toLowerCase();
-      const satellites = renderSatellites(body, x, y);
+      const satellites = renderSatellites(body, x, y, center);
+      const bodyRadius = bodyRadiusFor(body);
 
       if (body.typeKey === "rocky") {
         return `
@@ -1033,7 +1268,13 @@ const renderMap = (system) => {
             ${satellites}
             <circle class="planet-core" cx="${x.toFixed(
               1
-            )}" cy="${y.toFixed(1)}" r="11" />
+            )}" cy="${y.toFixed(1)}" r="${bodyRadius}" />
+            <circle class="planet-shade" cx="${x.toFixed(
+              1
+            )}" cy="${y.toFixed(1)}" r="${bodyRadius}" fill="url(#shade-${body.id})" />
+            <circle class="planet-highlight" cx="${x.toFixed(
+              1
+            )}" cy="${y.toFixed(1)}" r="${bodyRadius}" fill="url(#light-${body.id})" />
             <text class="body-label" x="${labelX.toFixed(
               1
             )}" y="${labelY.toFixed(1)}">${body.id}</text>
@@ -1047,10 +1288,13 @@ const renderMap = (system) => {
             ${satellites}
             <circle class="gas-core" cx="${x.toFixed(1)}" cy="${y.toFixed(
           1
-        )}" r="20" />
-            <circle class="gas-band" cx="${x.toFixed(1)}" cy="${y.toFixed(
-          1
-        )}" r="13" />
+        )}" r="${bodyRadius}" />
+            <circle class="planet-shade" cx="${x.toFixed(
+              1
+            )}" cy="${y.toFixed(1)}" r="${bodyRadius}" fill="url(#shade-${body.id})" />
+            <circle class="planet-highlight" cx="${x.toFixed(
+              1
+            )}" cy="${y.toFixed(1)}" r="${bodyRadius}" fill="url(#light-${body.id})" />
             <text class="body-label" x="${labelX.toFixed(
               1
             )}" y="${labelY.toFixed(1)}">${body.id}</text>
@@ -1077,6 +1321,7 @@ const renderMap = (system) => {
   svg.innerHTML = `
     <defs>
       ${shadowMarkup.defsMarkup}
+      ${lightingDefs}
     </defs>
     ${orbitMarkup}
     ${beltMarkup}

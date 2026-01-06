@@ -446,11 +446,12 @@ p {
 .strip-dots {
   position: relative;
   display: flex;
-  gap: 36px;
+  gap: 16px;
+  justify-content: space-between;
   align-items: flex-start;
   min-height: 150px;
   padding: calc(var(--strip-line-y) - var(--strip-dot-radius)) 4px 0;
-  width: max-content;
+  width: 100%;
 }
 
 .strip-body {
@@ -474,6 +475,15 @@ p {
 .focus-dim.is-focused {
   opacity: 1;
   filter: none;
+}
+
+.orbit.focus-dim.is-dimmed {
+  opacity: 0.1;
+  animation: none;
+}
+
+.orbit.focus-dim.is-focused {
+  opacity: 0.95;
 }
 
 .strip-main {
@@ -914,13 +924,10 @@ p {
 
 .asteroid-point--major {
   opacity: 0.95;
-  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
 }
 
-.asteroid-tick {
-  stroke: rgba(255, 255, 255, 0.6);
-  stroke-width: 1.2;
-  opacity: 0.7;
+.asteroid-major {
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.3));
 }
 
 .belt-marker {
@@ -940,13 +947,12 @@ p {
 }
 
 .satellite-orbit--ring {
-  stroke-width: 2.8;
+  stroke-width: 5;
   opacity: 0.8;
 }
 
 .satellite-orbit--empty {
-  stroke-dasharray: 3 4;
-  opacity: 0.4;
+  display: none;
 }
 
 .satellite-body {
@@ -954,12 +960,25 @@ p {
   fill: color-mix(in srgb, var(--body-color) 70%, white 30%);
 }
 
-.satellite-body--major {
-  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.2));
+.satellite--small {
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.2));
+}
+
+.satellite--major {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.3));
 }
 
 .body {
   filter: drop-shadow(0 0 6px rgba(120, 180, 255, 0.35));
+}
+
+.planet-shade,
+.planet-highlight,
+.satellite-shade,
+.satellite-highlight,
+.asteroid-shade,
+.asteroid-highlight {
+  pointer-events: none;
 }
 
 .body--hot {
@@ -988,12 +1007,6 @@ p {
   stroke-width: 1.2;
 }
 
-.body--gas .gas-band {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.5);
-  stroke-width: 2.5;
-}
-
 .body--belt .belt-marker--ring {
   fill: none;
   stroke: var(--body-color);
@@ -1012,7 +1025,7 @@ p {
 
 .body-label {
   font-size: 14px;
-  fill: var(--muted);
+  fill: #000;
   letter-spacing: 0.12em;
   text-anchor: middle;
   dominant-baseline: middle;
