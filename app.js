@@ -467,6 +467,8 @@ let rng = Math.random;
 let currentSeed = "";
 let currentSeedIsRandom = true;
 let rollCount = 0;
+let focusLookup = new Map();
+let currentSystem = null;
 
 const xmur3 = (input) => {
   let h = 1779033703 ^ input.length;
@@ -1213,6 +1215,39 @@ const renderBodyLighting = (bodies, center) => {
   return defsMarkup;
 };
 
+const buildStarLayer = (randSeed, size, count, minR, maxR, minO, maxO) => {
+  let circles = "";
+  for (let i = 0; i < count; i += 1) {
+    const x = randSeed() * size;
+    const y = randSeed() * size;
+    const r = minR + randSeed() * (maxR - minR);
+    const o = minO + randSeed() * (maxO - minO);
+    circles += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(
+      1
+    )}" r="${r.toFixed(2)}" fill="white" opacity="${o.toFixed(2)}" />`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${circles}</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+};
+
+const applyStarfield = () => {
+  const seedGen = xmur3(`${currentSeed}-sky`);
+  const skyRand = mulberry32(seedGen());
+  const layer1 = buildStarLayer(skyRand, 900, 150, 0.4, 1.6, 0.15, 0.5);
+  const layer2 = buildStarLayer(skyRand, 1400, 90, 0.6, 2.2, 0.2, 0.6);
+  const offset1 = `${Math.floor(skyRand() * 200)}px ${Math.floor(
+    skyRand() * 200
+  )}px`;
+  const offset2 = `${Math.floor(skyRand() * 320)}px ${Math.floor(
+    skyRand() * 320
+  )}px`;
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--sky-layer-1", `url("${layer1}")`);
+  rootStyle.setProperty("--sky-layer-2", `url("${layer2}")`);
+  rootStyle.setProperty("--sky-pos-1", offset1);
+  rootStyle.setProperty("--sky-pos-2", offset2);
+};
+
 const renderMap = (system) => {
   const svg = document.getElementById("system-map");
   const center = 500;
@@ -1302,19 +1337,7 @@ const renderMap = (system) => {
         `;
       }
 
-      return `
-        <g class="body body--belt body--${bandClass} focus-dim" data-focus-id="${body.id}">
-          <circle class="belt-marker belt-marker--ring" cx="${x.toFixed(
-            1
-          )}" cy="${y.toFixed(1)}" r="7" />
-          <circle class="belt-marker belt-marker--core" cx="${x.toFixed(
-            1
-          )}" cy="${y.toFixed(1)}" r="2.4" />
-          <text class="body-label" x="${labelX.toFixed(
-            1
-          )}" y="${labelY.toFixed(1)}">${body.id}</text>
-        </g>
-      `;
+      return "";
     })
     .join("");
 
@@ -1367,6 +1390,7 @@ const renderStripBody = (body) => {
       : body.typeKey === "belt"
       ? "strip-dot--belt"
       : "strip-dot--rocky";
+  const bodyClass = `strip-body--${body.typeKey}`;
 
   let mainLines = [];
   if (body.typeKey === "rocky") {
@@ -1398,7 +1422,15 @@ const renderStripBody = (body) => {
     `${body.id} ${body.typeLabel}`,
     mainLines
   );
-  const mainMarkup = `<div class="strip-main">${mainDot}<div class="strip-dot-label">${body.id}</div></div>`;
+  const ringCount =
+    body.typeKey === "gas"
+      ? body.gas.rings.filter((ring) => !ring.empty).length
+      : 0;
+  const ringMarkup =
+    ringCount > 0
+      ? `<span class="strip-ring strip-ring--back" aria-hidden="true"></span><span class="strip-ring strip-ring--front" aria-hidden="true"></span>`
+      : "";
+  const mainMarkup = `<div class="strip-main">${ringMarkup}${mainDot}<div class="strip-dot-label">${body.id}</div></div>`;
 
   const subDots = [];
   if (body.typeKey === "rocky") {
@@ -1489,11 +1521,16 @@ const renderStripBody = (body) => {
   }
 
   const hasSubs = subDots.length > 0;
+  const stemClass = body.typeKey === "belt" ? "strip-stem strip-stem--belt" : "strip-stem";
+  const subClass =
+    body.typeKey === "belt" ? "strip-subdots strip-subdots--belt" : "strip-subdots";
   const subHtml = hasSubs
-    ? `<div class="strip-stem"></div><div class="strip-subdots">${subDots.join("")}</div>`
+    ? `<div class="${stemClass}"></div><div class="${subClass}">${subDots.join(
+        ""
+      )}</div>`
     : "";
 
-  return `<div class="strip-body focus-dim${
+  return `<div class="strip-body ${bodyClass} strip-band--${bandClass} focus-dim${
     hasSubs ? " strip-body--subs" : ""
   }" data-focus-id="${body.id}">${mainMarkup}${subHtml}</div>`;
 };
@@ -1685,6 +1722,93 @@ const renderBeltDetails = (belt) => {
   return html;
 };
 
+const buildSystemText = (system) => {
+  if (!system) {
+    return "";
+  }
+  const lines = [];
+  lines.push(`Seed: ${currentSeed}`);
+  lines.push(`Stars: ${system.stars.length}`);
+  lines.push(`Bodies: ${system.bodyCount}`);
+  lines.push(`Rolls: ${rollCount}`);
+  lines.push("");
+  lines.push("Stars");
+
+  let secondaryIndex = 0;
+  system.starsOrdered.forEach((star) => {
+    const role = star.isPrimary ? "Primary" : `Secondary ${++secondaryIndex}`;
+    lines.push(`${role} star`);
+    lines.push(`- Type: ${star.type}`);
+    lines.push(`- Size: ${star.size}`);
+    lines.push(`- Color: ${star.color}`);
+    lines.push(`- Light: ${star.light}`);
+    lines.push(`- Sky color: ${star.skyColor}`);
+    lines.push(`- Flora tint: ${star.flora}`);
+    lines.push("");
+  });
+
+  lines.push("Bodies");
+  const bodies = system.bodiesOrdered ?? system.bodies;
+  bodies.forEach((body) => {
+    lines.push(`${body.id} ${body.typeLabel} (${body.band.label} band)`);
+    if (body.typeKey === "rocky") {
+      lines.push(`- Planet type: ${body.rocky.planetType}`);
+      lines.push(`- Description: ${body.rocky.description}`);
+      lines.push(`- Appearance: ${body.rocky.appearance}`);
+      lines.push(`- Tectonics: ${body.rocky.tectonics}`);
+      lines.push(`- Atmosphere: ${body.rocky.atmosphere}`);
+      lines.push(`- Water: ${body.rocky.water}`);
+      lines.push(`- Small moons: ${body.rocky.smallMoons.length}`);
+      body.rocky.smallMoons.forEach((moon, index) => {
+        lines.push(`  - SM${index + 1}: ${moon.archetype}`);
+        lines.push(`    - Description: ${moon.description}`);
+        lines.push(`    - Geology: ${moon.geology}`);
+        lines.push(`    - Atmosphere: ${moon.atmosphere}`);
+        lines.push(`    - Water: ${moon.water}`);
+        lines.push(`    - Appearance: ${moon.appearance}`);
+      });
+    } else if (body.typeKey === "gas") {
+      lines.push(`- Giant type: ${body.gas.type}`);
+      lines.push(`- Description: ${body.gas.description}`);
+      lines.push(`- Appearance: ${body.gas.appearance}`);
+      lines.push(`- Rings: ${body.gas.rings.length}`);
+      body.gas.rings.forEach((ring, index) => {
+        lines.push(
+          `  - R${index + 1}: ${ring.empty ? "Empty slot" : "Ring system"}`
+        );
+      });
+      lines.push(`- Small moons: ${body.gas.smallMoons.length}`);
+      body.gas.smallMoons.forEach((moon, index) => {
+        lines.push(`  - SM${index + 1}: ${moon.archetype}`);
+        lines.push(`    - Description: ${moon.description}`);
+        lines.push(`    - Geology: ${moon.geology}`);
+        lines.push(`    - Atmosphere: ${moon.atmosphere}`);
+        lines.push(`    - Water: ${moon.water}`);
+        lines.push(`    - Appearance: ${moon.appearance}`);
+      });
+      lines.push(`- Major moons: ${body.gas.majorMoons.length}`);
+      body.gas.majorMoons.forEach((moon, index) => {
+        lines.push(`  - MM${index + 1}: ${moon.planetType}`);
+        lines.push(`    - Description: ${moon.description}`);
+        lines.push(`    - Tectonics: ${moon.tectonics}`);
+        lines.push(`    - Atmosphere: ${moon.atmosphere}`);
+        lines.push(`    - Water: ${moon.water}`);
+        lines.push(`    - Appearance: ${moon.appearance}`);
+      });
+    } else if (body.typeKey === "belt") {
+      lines.push(`- Major asteroids: ${body.belt.majorCount}`);
+      body.belt.asteroids.forEach((asteroid, index) => {
+        lines.push(
+          `  - A${index + 1}: ${asteroid.composition}, ${asteroid.surface}, ${asteroid.appearance}`
+        );
+      });
+    }
+    lines.push("");
+  });
+
+  return lines.join("\n").trim();
+};
+
 const renderDetails = (system) => {
   const container = document.getElementById("details");
   let html = "";
@@ -1710,13 +1834,16 @@ const renderDetails = (system) => {
     .join("");
 
   html += `
-    <div class="detail-card">
-      <div class="card-header">
-        <div class="card-title">Stars</div>
-        <div class="chip">${system.stars.length} total</div>
+    <details class="detail-card" open>
+      <summary class="card-header">
+        <span class="card-title">Stars</span>
+        <span class="chip">${system.stars.length} total</span>
+        <span class="card-toggle" aria-hidden="true"></span>
+      </summary>
+      <div class="detail-body">
+        ${starLines}
       </div>
-      ${starLines}
-    </div>
+    </details>
   `;
 
   const bodies = system.bodiesOrdered ?? system.bodies;
@@ -1732,13 +1859,16 @@ const renderDetails = (system) => {
     }
 
     html += `
-      <div class="detail-card">
-        <div class="card-header">
-          <div class="card-title">${body.id} ${body.typeLabel}</div>
-          <div class="chip ${bandClass}">${body.band.label}</div>
+      <details class="detail-card">
+        <summary class="card-header">
+          <span class="card-title">${body.id} ${body.typeLabel}</span>
+          <span class="chip ${bandClass}">${body.band.label}</span>
+          <span class="card-toggle" aria-hidden="true"></span>
+        </summary>
+        <div class="detail-body">
+          ${bodyDetails}
         </div>
-        ${bodyDetails}
-      </div>
+      </details>
     `;
   });
 
@@ -1752,6 +1882,50 @@ const renderDetails = (system) => {
 
 let activeFocusId = "";
 
+const setCopyStatus = (message, isSuccess = false) => {
+  const status = document.getElementById("copy-status");
+  if (!status) {
+    return;
+  }
+  status.textContent = message;
+  status.classList.toggle("is-success", isSuccess);
+};
+
+const updateMapHud = (body) => {
+  const hud = document.getElementById("map-hud");
+  if (!hud) {
+    return;
+  }
+
+  if (!body) {
+    hud.classList.add("is-empty");
+    hud.innerHTML =
+      '<div class="map-hud-title">Hover a body</div><div class="map-hud-line">Type, band, key stats</div>';
+    return;
+  }
+
+  const lines = [`${body.band.label} band`];
+  if (body.typeKey === "rocky") {
+    lines.push(body.rocky?.planetType || "Rocky world");
+  } else if (body.typeKey === "gas") {
+    const rings = body.gas?.rings?.filter((ring) => !ring.empty).length || 0;
+    const moons =
+      (body.gas?.smallMoons?.length || 0) +
+      (body.gas?.majorMoons?.length || 0);
+    lines.push(`Rings: ${rings}, Moons: ${moons}`);
+  } else if (body.typeKey === "belt") {
+    const majorCount = body.belt?.majorCount ?? 0;
+    lines.push(`Major asteroids: ${majorCount}`);
+  }
+
+  hud.classList.remove("is-empty");
+  hud.innerHTML = `<div class="map-hud-title">${body.id} ${
+    body.typeLabel
+  }</div>${lines
+    .map((line) => `<div class="map-hud-line">${line}</div>`)
+    .join("")}`;
+};
+
 const updateFocusState = (focusId) => {
   if (focusId === activeFocusId) {
     return;
@@ -1763,6 +1937,7 @@ const updateFocusState = (focusId) => {
     el.classList.toggle("is-focused", isMatch);
     el.classList.toggle("is-dimmed", activeFocusId !== "" && !isMatch);
   });
+  updateMapHud(focusLookup.get(activeFocusId) || null);
 };
 
 const setupHoverFocus = () => {
@@ -1797,6 +1972,10 @@ const buildShareLink = () => {
 };
 
 const renderSystem = (system) => {
+  currentSystem = system;
+  focusLookup = new Map(system.bodies.map((body) => [body.id, body]));
+  activeFocusId = "";
+
   const primary = system.starsOrdered[0];
   const starLabel = `${system.stars.length} star${
     system.stars.length === 1 ? "" : "s"
@@ -1825,6 +2004,9 @@ const renderSystem = (system) => {
   renderMap(system);
   renderDetails(system);
   renderStrip(system);
+  updateMapHud(null);
+  setCopyStatus("Ready to copy", false);
+  applyStarfield();
 };
 
 const init = () => {
@@ -1832,6 +2014,7 @@ const init = () => {
   const seedInput = document.getElementById("seed-input");
   const shareButton = document.getElementById("share-link");
   const shareOutput = document.getElementById("share-output");
+  const copyButton = document.getElementById("copy-system");
 
   const params = new URLSearchParams(window.location.search);
   const seedFromUrl = params.get("seed");
@@ -1869,6 +2052,47 @@ const init = () => {
         shareOutput.classList.add("is-visible");
         shareOutput.innerHTML = `${copied ? "Copied" : "Link"}: <a href="${url}" target="_blank" rel="noreferrer">${url}</a>`;
       }
+    });
+  }
+  if (copyButton) {
+    copyButton.addEventListener("click", async () => {
+      if (!currentSystem) {
+        setCopyStatus("Nothing to copy", false);
+        return;
+      }
+      const text = buildSystemText(currentSystem);
+      if (!text) {
+        setCopyStatus("Nothing to copy", false);
+        return;
+      }
+      let copied = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        try {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        } catch (error) {
+          copied = false;
+        }
+      }
+      if (!copied) {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          copied = document.execCommand("copy");
+        } catch (error) {
+          copied = false;
+        }
+        document.body.removeChild(textarea);
+      }
+      setCopyStatus(
+        copied ? "Copied. Ready to paste." : "Copy failed. Try again.",
+        copied
+      );
     });
   }
   if (seedInput) {
