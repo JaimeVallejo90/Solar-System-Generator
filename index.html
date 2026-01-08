@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -30,7 +30,7 @@
       </header>
 
       <main class="layout">
-        <section class="viz">
+        <section class="viz map-panel">
           <div class="viz-header">
             <div class="meta-group">
               <div class="meta meta--stars">
@@ -50,7 +50,12 @@
               <div class="meta-controls-body">
                 <div class="seed-field">
                   <label for="seed-input">Seed</label>
-                  <input id="seed-input" type="text" placeholder="random seed" />
+                  <input
+                    id="seed-input"
+                    type="text"
+                    maxlength="16"
+                    placeholder="random seed"
+                  />
                 </div>
                 <button class="btn" id="generate">Generate system</button>
               </div>
@@ -98,12 +103,28 @@
                 </div>
               </div>
             </div>
-            <div class="map-hud" id="map-hud" aria-live="polite">
-              <div class="map-hud-title">Hover a body</div>
-              <div class="map-hud-line">Type, band, key stats</div>
+            <div class="map-hud-stack">
+              <div class="map-hud" id="map-hud" aria-live="polite">
+                <div class="map-hud-title">Hover a body</div>
+                <div class="map-hud-line">Type, band, key stats</div>
+              </div>
+              <div
+                class="map-hud-controls"
+                role="group"
+                aria-label="Map navigation"
+              >
+                <button class="map-hud-btn" id="hud-prev" type="button">
+                  Prev
+                </button>
+                <button class="map-hud-btn" id="hud-next" type="button">
+                  Next
+                </button>
+              </div>
             </div>
           </div>
+        </section>
 
+        <section class="strip-panel">
           <div class="strip">
             <div class="strip-title">Orbital line</div>
             <div class="strip-line">
@@ -120,6 +141,19 @@
                 <div class="strip-dots" id="system-strip"></div>
               </div>
             </div>
+            <div
+              class="strip-nav"
+              id="strip-nav"
+              role="group"
+              aria-label="Orbital line navigation"
+            >
+              <button class="strip-nav-btn" id="strip-prev" type="button">
+                Prev
+              </button>
+              <button class="strip-nav-btn" id="strip-next" type="button">
+                Next
+              </button>
+            </div>
           </div>
         </section>
 
@@ -127,18 +161,36 @@
           <div class="details-header">
             <h2>System details</h2>
             <div class="details-tools">
-              <div class="copy-panel">
+              <div class="copy-inline">
+                <div class="copy-status" id="copy-status" aria-live="polite"></div>
                 <button class="btn btn-secondary" id="copy-system" type="button">
                   Copy text
                 </button>
-                <div class="copy-status" id="copy-status">Ready to copy</div>
               </div>
             </div>
           </div>
           <div id="details"></div>
         </section>
       </main>
+      <footer class="site-footer">
+        <a
+          class="repo-link"
+          href="https://github.com/JaimeVallejo90/Solar-System-Generator"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Link to repository
+        </a>
+      </footer>
     </div>
+    <button
+      class="scroll-top"
+      id="scroll-top"
+      type="button"
+      aria-label="Scroll to top"
+    >
+      Top
+    </button>
 
     <script src="app.js"></script>
   </body>

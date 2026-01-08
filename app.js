@@ -12,6 +12,11 @@ const bandInfo = {
 };
 const bandOrder = ["Hot", "Temperate", "Cold"];
 const TAU = Math.PI * 2;
+const MAP_VIEWBOX_SIZE = 1000;
+const MAP_CENTER = MAP_VIEWBOX_SIZE / 2;
+const MAP_FOCUS_ZOOM = 1.5;
+const SEED_MAX_LENGTH = 16;
+const SEED_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 const starTypes = [
   {
@@ -491,15 +496,20 @@ const mulberry32 = (seed) => () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
 
-const makeSeed = () =>
-  `seed-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(
-    36
-  )}`;
+const makeSeed = () => {
+  let seed = "";
+  for (let i = 0; i < SEED_MAX_LENGTH; i += 1) {
+    seed += SEED_CHARS[Math.floor(Math.random() * SEED_CHARS.length)];
+  }
+  return seed;
+};
 
 const setSeed = (seedInput) => {
   const trimmed = seedInput ? seedInput.trim() : "";
   const isRandom = trimmed.length === 0;
-  const normalized = isRandom ? makeSeed() : trimmed;
+  const normalized = isRandom
+    ? makeSeed()
+    : trimmed.slice(0, SEED_MAX_LENGTH);
   const seedGen = xmur3(normalized);
   rng = mulberry32(seedGen());
   currentSeed = normalized;
@@ -777,6 +787,7 @@ const generateSystem = () => {
 
 const starRadius = (sizeRank) => 14 + sizeRank * 4;
 const bodyRadiusFor = (body) => (body.typeKey === "gas" ? 20 : 11);
+const starFocusId = (index) => `STAR-${index + 1}`;
 
 const starOffsets = (count) => {
   if (count === 1) {
@@ -1250,9 +1261,16 @@ const applyStarfield = () => {
 
 const renderMap = (system) => {
   const svg = document.getElementById("system-map");
-  const center = 500;
+  const center = MAP_CENTER;
   const offsets = starOffsets(system.starsOrdered.length);
   const bodies = system.bodiesOrdered ?? system.bodies;
+  bodyPositions = new Map();
+  bodies.forEach((body) => {
+    const angle = body.orbitAngle ?? 0;
+    const x = center + Math.cos(angle) * body.orbitRadius;
+    const y = center + Math.sin(angle) * body.orbitRadius;
+    bodyPositions.set(body.id, { x, y });
+  });
 
   const orbitMarkup = bodies
     .map((body) => {
@@ -1278,8 +1296,12 @@ const renderMap = (system) => {
     .map((star, index) => {
       const [dx, dy] = offsets[index] || [0, 0];
       const radius = starRadius(star.sizeRank);
+      const x = center + dx;
+      const y = center + dy;
+      const starId = starFocusId(index);
+      bodyPositions.set(starId, { x, y });
       return `
-        <g class="star" transform="translate(${center + dx} ${center + dy})">
+        <g class="star focus-dim" data-focus-id="${starId}" transform="translate(${x} ${y})">
           <circle class="star-core" r="${radius}" fill="${star.hex}" />
         </g>
       `;
@@ -1382,6 +1404,38 @@ const renderStripDot = (label, className, tooltipTitle, lines) =>
     lines
   )}</div>`;
 
+const buildStripBeltPoints = (body) => {
+  const seedGen = xmur3(`${currentSeed}-strip-belt-${body.id}`);
+  const randLocal = mulberry32(seedGen());
+  const count = 12 + Math.floor(randLocal() * 6);
+  const points = [];
+  for (let i = 0; i < count; i += 1) {
+    points.push({
+      x: 18 + randLocal() * 64,
+      y: 18 + randLocal() * 64,
+      r: 1 + randLocal() * 1.6,
+    });
+  }
+  return points;
+};
+
+const renderStripBeltDot = (label, className, tooltipTitle, lines, points) => {
+  const pointMarkup = points
+    .map(
+      (point) =>
+        `<span class="strip-belt-point" style="--bx:${point.x.toFixed(
+          1
+        )}%; --by:${point.y.toFixed(1)}%; --br:${point.r.toFixed(
+          2
+        )}px;"></span>`
+    )
+    .join("");
+  return `<div class="strip-dot ${className} strip-dot--belt-cluster" tabindex="0" aria-label="${label}">${pointMarkup}${renderTooltip(
+    tooltipTitle,
+    lines
+  )}</div>`;
+};
+
 const renderStripBody = (body) => {
   const bandClass = body.band.className;
   const typeClass =
@@ -1416,12 +1470,22 @@ const renderStripBody = (body) => {
     ];
   }
 
-  const mainDot = renderStripDot(
-    body.id,
-    `strip-dot--main strip-dot--${bandClass} ${typeClass}`,
-    `${body.id} ${body.typeLabel}`,
-    mainLines
-  );
+  const mainDotClasses = `strip-dot--main strip-dot--${bandClass} ${typeClass}`;
+  const mainDot =
+    body.typeKey === "belt"
+      ? renderStripBeltDot(
+          body.id,
+          mainDotClasses,
+          `${body.id} ${body.typeLabel}`,
+          mainLines,
+          buildStripBeltPoints(body)
+        )
+      : renderStripDot(
+          body.id,
+          mainDotClasses,
+          `${body.id} ${body.typeLabel}`,
+          mainLines
+        );
   const ringCount =
     body.typeKey === "gas"
       ? body.gas.rings.filter((ring) => !ring.empty).length
@@ -1535,6 +1599,32 @@ const renderStripBody = (body) => {
   }" data-focus-id="${body.id}">${mainMarkup}${subHtml}</div>`;
 };
 
+const updateStripConnector = () => {
+  const line = document.querySelector(".strip-line");
+  if (!line) {
+    return;
+  }
+  const connector = line.querySelector(".strip-connector");
+  if (!connector) {
+    return;
+  }
+  const dots = line.querySelectorAll(".strip-body");
+  if (dots.length === 0) {
+    connector.style.right = "";
+    return;
+  }
+  const lastBody = dots[dots.length - 1];
+  const mainDot = lastBody.querySelector(".strip-dot--main");
+  if (!mainDot) {
+    connector.style.right = "";
+    return;
+  }
+  const lineRect = line.getBoundingClientRect();
+  const dotRect = mainDot.getBoundingClientRect();
+  const right = Math.max(8, lineRect.right - (dotRect.left + dotRect.width / 2));
+  connector.style.right = `${right.toFixed(1)}px`;
+};
+
 const renderStrip = (system) => {
   const container = document.getElementById("system-strip");
   if (!container) {
@@ -1556,6 +1646,8 @@ const renderStrip = (system) => {
     sun.title = `Primary ${primary.type} star`;
     sun.setAttribute("tabindex", "0");
     sun.setAttribute("aria-label", `Primary ${primary.type} star`);
+    sun.setAttribute("data-focus-id", starFocusId(0));
+    sun.classList.add("focus-dim");
     sun.innerHTML = renderTooltip("Primary star", starLines);
   }
 
@@ -1567,22 +1659,22 @@ const renderStrip = (system) => {
       secondaryStars.length > 0
     );
     secondaryWrap.innerHTML = secondaryStars
-      .map(
-        (star, index) => {
-          const starLines = [
-            { label: "Type", value: star.type },
-            { label: "Size", value: star.size },
-            { label: "Color", value: star.color },
-            { label: "Light", value: star.light },
-          ];
-          return `<div class="strip-secondary-dot" style="--sun-color: ${star.hex}" tabindex="0" aria-label="Secondary ${index + 1} ${star.type} star">${renderTooltip(
-            `Secondary ${index + 1}`,
-            starLines
-          )}</div>`;
-        }
-      )
+      .map((star, index) => {
+        const starLines = [
+          { label: "Type", value: star.type },
+          { label: "Size", value: star.size },
+          { label: "Color", value: star.color },
+          { label: "Light", value: star.light },
+        ];
+        const starId = starFocusId(index + 1);
+        return `<div class="strip-secondary-dot focus-dim" data-focus-id="${starId}" style="--sun-color: ${star.hex}" tabindex="0" aria-label="Secondary star">${renderTooltip(
+          "Secondary star",
+          starLines
+        )}</div>`;
+      })
       .join("");
   }
+  requestAnimationFrame(updateStripConnector);
 };
 
 const groupAsteroids = (asteroids) => {
@@ -1734,9 +1826,8 @@ const buildSystemText = (system) => {
   lines.push("");
   lines.push("Stars");
 
-  let secondaryIndex = 0;
   system.starsOrdered.forEach((star) => {
-    const role = star.isPrimary ? "Primary" : `Secondary ${++secondaryIndex}`;
+    const role = star.isPrimary ? "Primary" : "Secondary";
     lines.push(`${role} star`);
     lines.push(`- Type: ${star.type}`);
     lines.push(`- Size: ${star.size}`);
@@ -1813,14 +1904,15 @@ const renderDetails = (system) => {
   const container = document.getElementById("details");
   let html = "";
 
-  let secondaryIndex = 0;
   const starLines = system.starsOrdered
-    .map((star) => {
+    .map((star, index) => {
       const role = star.isPrimary
         ? "Primary"
-        : `Secondary ${++secondaryIndex}`;
+        : "Secondary";
       return `
-        <div class="sub-section star-section">
+        <div class="sub-section star-section" data-focus-id="${starFocusId(
+          index
+        )}">
           <div class="sub-title">${role} star</div>
           ${infoLine("Type", star.type)}
           ${infoLine("Size", star.size)}
@@ -1834,16 +1926,15 @@ const renderDetails = (system) => {
     .join("");
 
   html += `
-    <details class="detail-card" open>
-      <summary class="card-header">
+    <div class="detail-card">
+      <div class="card-header">
         <span class="card-title">Stars</span>
         <span class="chip">${system.stars.length} total</span>
-        <span class="card-toggle" aria-hidden="true"></span>
-      </summary>
+      </div>
       <div class="detail-body">
         ${starLines}
       </div>
-    </details>
+    </div>
   `;
 
   const bodies = system.bodiesOrdered ?? system.bodies;
@@ -1859,16 +1950,15 @@ const renderDetails = (system) => {
     }
 
     html += `
-      <details class="detail-card">
-        <summary class="card-header">
+      <div class="detail-card" data-focus-id="${body.id}">
+        <div class="card-header">
           <span class="card-title">${body.id} ${body.typeLabel}</span>
           <span class="chip ${bandClass}">${body.band.label}</span>
-          <span class="card-toggle" aria-hidden="true"></span>
-        </summary>
+        </div>
         <div class="detail-body">
           ${bodyDetails}
         </div>
-      </details>
+      </div>
     `;
   });
 
@@ -1881,17 +1971,214 @@ const renderDetails = (system) => {
 };
 
 let activeFocusId = "";
+let hoverFocusId = "";
+let selectedFocusId = "";
+let focusOrder = [];
+let bodyPositions = new Map();
+let mapViewBox = {
+  x: 0,
+  y: 0,
+  width: MAP_VIEWBOX_SIZE,
+  height: MAP_VIEWBOX_SIZE,
+};
+let mapViewBoxAnimation = 0;
+let lastFocusId = "";
+let lastSelectedFocusId = "";
+let scrollTopButton = null;
+let mapShellElement = null;
+let copyStatusTimer = 0;
+let stripNav = null;
+let stripPanelElement = null;
+let autoScrollEnabled = false;
 
-const setCopyStatus = (message, isSuccess = false) => {
-  const status = document.getElementById("copy-status");
-  if (!status) {
+const setCopyStatus = (message = "", status = "success") => {
+  const statusEl = document.getElementById("copy-status");
+  if (!statusEl) {
     return;
   }
-  status.textContent = message;
-  status.classList.toggle("is-success", isSuccess);
+  if (copyStatusTimer) {
+    clearTimeout(copyStatusTimer);
+    copyStatusTimer = 0;
+  }
+  statusEl.textContent = message;
+  statusEl.classList.remove("is-visible", "is-success", "is-error");
+  if (!message) {
+    return;
+  }
+  statusEl.classList.add("is-visible");
+  if (status === "success") {
+    statusEl.classList.add("is-success");
+  } else if (status === "error") {
+    statusEl.classList.add("is-error");
+  }
+  const duration = status === "success" ? 2200 : 2800;
+  copyStatusTimer = window.setTimeout(() => {
+    statusEl.classList.remove("is-visible", "is-success", "is-error");
+    statusEl.textContent = "";
+    copyStatusTimer = 0;
+  }, duration);
 };
 
-const updateMapHud = (body) => {
+const getCurrentFocusId = () => selectedFocusId || hoverFocusId;
+
+const viewBoxToString = (box) =>
+  `${box.x.toFixed(2)} ${box.y.toFixed(2)} ${box.width.toFixed(
+    2
+  )} ${box.height.toFixed(2)}`;
+
+const setMapViewBox = (target, animate = true) => {
+  const svg = document.getElementById("system-map");
+  if (!svg || !target) {
+    return;
+  }
+  const next = {
+    x: target.x,
+    y: target.y,
+    width: target.width,
+    height: target.height,
+  };
+  const reduceMotion =
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (mapViewBoxAnimation) {
+    cancelAnimationFrame(mapViewBoxAnimation);
+    mapViewBoxAnimation = 0;
+  }
+
+  if (!animate || reduceMotion) {
+    mapViewBox = next;
+    svg.setAttribute("viewBox", viewBoxToString(next));
+    return;
+  }
+
+  const start = { ...mapViewBox };
+  const startTime = performance.now();
+  const duration = 420;
+  const ease = (t) =>
+    t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+  const step = (now) => {
+    const t = clamp((now - startTime) / duration, 0, 1);
+    const eased = ease(t);
+    const current = {
+      x: start.x + (next.x - start.x) * eased,
+      y: start.y + (next.y - start.y) * eased,
+      width: start.width + (next.width - start.width) * eased,
+      height: start.height + (next.height - start.height) * eased,
+    };
+    svg.setAttribute("viewBox", viewBoxToString(current));
+    if (t < 1) {
+      mapViewBoxAnimation = requestAnimationFrame(step);
+      return;
+    }
+    mapViewBox = next;
+    mapViewBoxAnimation = 0;
+  };
+
+  mapViewBoxAnimation = requestAnimationFrame(step);
+};
+
+const resetMapView = (animate = true) => {
+  setMapViewBox(
+    {
+      x: 0,
+      y: 0,
+      width: MAP_VIEWBOX_SIZE,
+      height: MAP_VIEWBOX_SIZE,
+    },
+    animate
+  );
+};
+
+const zoomToFocus = (focusId, animate = true) => {
+  const position = bodyPositions.get(focusId);
+  if (!position) {
+    return;
+  }
+  const size = MAP_VIEWBOX_SIZE / MAP_FOCUS_ZOOM;
+  const half = size / 2;
+  const next = {
+    x: clamp(position.x - half, 0, MAP_VIEWBOX_SIZE - size),
+    y: clamp(position.y - half, 0, MAP_VIEWBOX_SIZE - size),
+    width: size,
+    height: size,
+  };
+  setMapViewBox(next, animate);
+};
+
+const updateDetailsSelection = () => {
+  const cards = document.querySelectorAll(".detail-card[data-focus-id]");
+  cards.forEach((card) => {
+    const isSelected =
+      selectedFocusId !== "" && card.dataset.focusId === selectedFocusId;
+    card.classList.toggle("is-selected", isSelected);
+  });
+  const starSections = document.querySelectorAll(".star-section[data-focus-id]");
+  starSections.forEach((section) => {
+    const isSelected =
+      selectedFocusId !== "" && section.dataset.focusId === selectedFocusId;
+    section.classList.toggle("is-selected", isSelected);
+  });
+};
+
+const pushHudLine = (lines, text, className = "") => {
+  lines.push({ text, className });
+};
+
+const pushHudDivider = (lines) => {
+  lines.push({ isDivider: true });
+};
+
+const renderHudLines = (lines) =>
+  lines
+    .map((line) => {
+      if (line.isDivider) {
+        return '<div class="map-hud-divider"></div>';
+      }
+      const className = line.className ? ` ${line.className}` : "";
+      return `<div class="map-hud-line${className}">${line.text}</div>`;
+    })
+    .join("");
+
+const listTypeCounts = (items, getter) => {
+  if (!items || items.length === 0) {
+    return { shown: [], remaining: 0 };
+  }
+  const counts = new Map();
+  const order = [];
+  items.forEach((item) => {
+    const name = typeof getter === "function" ? getter(item) : item[getter];
+    if (typeof name !== "string" || name.trim() === "") {
+      return;
+    }
+    if (!counts.has(name)) {
+      counts.set(name, 0);
+      order.push(name);
+    }
+    counts.set(name, counts.get(name) + 1);
+  });
+  const shown = order.map((name) => ({
+    name,
+    count: counts.get(name) || 0,
+  }));
+  return { shown, remaining: 0 };
+};
+
+const appendTypeBullets = (lines, items, getter) => {
+  if (!items || items.length === 0) {
+    pushHudLine(lines, "None", "map-hud-line--bullet");
+    return;
+  }
+  const { shown } = listTypeCounts(items, getter);
+  shown.forEach((entry) => {
+    const label =
+      entry.count > 1 ? `${entry.name} x${entry.count}` : entry.name;
+    pushHudLine(lines, label, "map-hud-line--bullet");
+  });
+};
+
+const updateMapHud = (body, isSelected = false) => {
   const hud = document.getElementById("map-hud");
   if (!hud) {
     return;
@@ -1900,55 +2187,216 @@ const updateMapHud = (body) => {
   if (!body) {
     hud.classList.add("is-empty");
     hud.innerHTML =
-      '<div class="map-hud-title">Hover a body</div><div class="map-hud-line">Type, band, key stats</div>';
+      '<div class="map-hud-title">Hover a body</div><div class="map-hud-line">Click a body to lock selection</div><div class="map-hud-tip">Left/Right arrows to browse, Esc to clear</div>';
     return;
   }
 
-  const lines = [`${body.band.label} band`];
+  if (body.typeKey === "star") {
+    const star = body.star;
+    const lines = [];
+    pushHudLine(lines, `Type: ${star.type}`);
+    pushHudLine(lines, `Size: ${star.size}`);
+    pushHudLine(lines, `Color: ${star.color}`);
+    if (isSelected) {
+      pushHudDivider(lines);
+      pushHudLine(lines, `Light: ${star.light}`);
+      pushHudLine(lines, `Sky color: ${star.skyColor}`);
+      pushHudLine(lines, `Flora tint: ${star.flora}`);
+    }
+    hud.classList.remove("is-empty");
+    const tip = isSelected
+      ? "Left/Right arrows to browse, Esc to clear"
+      : "Click to lock selection";
+    hud.innerHTML = `<div class="map-hud-title">${body.role}</div>${
+      isSelected ? '<div class="map-hud-tag">Locked</div>' : ""
+    }${renderHudLines(lines)}<div class="map-hud-tip">${tip}</div>`;
+    return;
+  }
+
+  const lines = [];
+  const showBandLine = !isSelected || body.typeKey !== "gas";
+  if (showBandLine) {
+    pushHudLine(lines, `${body.band.label} band`);
+  }
   if (body.typeKey === "rocky") {
-    lines.push(body.rocky?.planetType || "Rocky world");
+    pushHudLine(lines, body.rocky?.planetType || "Rocky world");
+    if (isSelected) {
+      const moons = body.rocky?.smallMoons || [];
+      const appearance = body.rocky?.appearance || "Unknown";
+      const atmosphere = body.rocky?.atmosphere || "Unknown";
+      const water = body.rocky?.water || "Unknown";
+      pushHudLine(lines, `Appearance: ${appearance}`);
+      pushHudLine(lines, `Atmosphere: ${atmosphere}`);
+      pushHudLine(lines, `Water: ${water}`);
+      pushHudDivider(lines);
+      pushHudLine(lines, `Small moons: ${moons.length}`);
+      appendTypeBullets(lines, moons, "archetype");
+    }
   } else if (body.typeKey === "gas") {
+    if (!isSelected) {
+      pushHudLine(lines, body.gas?.type || "Gas giant");
+    }
     const rings = body.gas?.rings?.filter((ring) => !ring.empty).length || 0;
-    const moons =
-      (body.gas?.smallMoons?.length || 0) +
-      (body.gas?.majorMoons?.length || 0);
-    lines.push(`Rings: ${rings}, Moons: ${moons}`);
+    const smallMoons = body.gas?.smallMoons || [];
+    const majorMoons = body.gas?.majorMoons || [];
+    const moons = smallMoons.length + majorMoons.length;
+    if (isSelected) {
+      const appearance = body.gas?.appearance || "Unknown";
+      pushHudLine(lines, `Appearance: ${appearance}`);
+      pushHudDivider(lines);
+      pushHudLine(lines, `Rings: ${rings}`);
+      pushHudDivider(lines);
+      pushHudLine(lines, `Small moons: ${smallMoons.length}`);
+      appendTypeBullets(lines, smallMoons, "archetype");
+      pushHudDivider(lines);
+      pushHudLine(lines, `Major moons: ${majorMoons.length}`);
+      appendTypeBullets(lines, majorMoons, "planetType");
+    } else {
+      pushHudLine(lines, `Rings: ${rings}, Moons: ${moons}`);
+    }
   } else if (body.typeKey === "belt") {
     const majorCount = body.belt?.majorCount ?? 0;
-    lines.push(`Major asteroids: ${majorCount}`);
+    pushHudLine(lines, `Major asteroids: ${majorCount}`);
   }
 
   hud.classList.remove("is-empty");
+  const tip = isSelected
+    ? "Left/Right arrows to browse, Esc to clear"
+    : "Click to lock selection";
   hud.innerHTML = `<div class="map-hud-title">${body.id} ${
     body.typeLabel
-  }</div>${lines
-    .map((line) => `<div class="map-hud-line">${line}</div>`)
-    .join("")}`;
+  }</div>${isSelected ? '<div class="map-hud-tag">Locked</div>' : ""}${renderHudLines(
+    lines
+  )}<div class="map-hud-tip">${tip}</div>`;
 };
 
-const updateFocusState = (focusId) => {
-  if (focusId === activeFocusId) {
+const updateScrollTopVisibility = () => {
+  if (!mapShellElement) {
     return;
   }
+  const rect = mapShellElement.getBoundingClientRect();
+  const visible =
+    Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0);
+  const visibleHeight = Math.max(0, visible);
+  const shouldShow = rect.height > 0 && visibleHeight < rect.height / 2;
+  autoScrollEnabled = shouldShow;
+  if (scrollTopButton) {
+    scrollTopButton.classList.toggle("is-visible", shouldShow);
+  }
+  if (stripPanelElement) {
+    stripPanelElement.classList.toggle("is-tooltip-muted", shouldShow);
+  }
+};
+
+const updateStripNavVisibility = () => {
+  if (!stripNav || !stripPanelElement) {
+    return;
+  }
+  stripNav.classList.add("is-visible");
+};
+
+const isElementMostlyVisible = (element, margin = 80) => {
+  if (!element) {
+    return false;
+  }
+  const rect = element.getBoundingClientRect();
+  const viewHeight = window.innerHeight || document.documentElement.clientHeight;
+  return rect.top >= margin && rect.bottom <= viewHeight - margin;
+};
+
+const scrollFocusIntoView = (focusId) => {
+  if (!focusId) {
+    return;
+  }
+  const target =
+    document.querySelector(`.detail-card[data-focus-id="${focusId}"]`) ||
+    document.querySelector(`.star-section[data-focus-id="${focusId}"]`);
+  if (!target || isElementMostlyVisible(target)) {
+    return;
+  }
+  const reduceMotion =
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target.scrollIntoView({
+    behavior: reduceMotion ? "auto" : "smooth",
+    block: "center",
+  });
+};
+
+const updateFocusState = () => {
+  const focusId = getCurrentFocusId();
+  if (focusId === lastFocusId && selectedFocusId === lastSelectedFocusId) {
+    return;
+  }
+  lastFocusId = focusId;
+  lastSelectedFocusId = selectedFocusId;
   activeFocusId = focusId || "";
   const focusables = document.querySelectorAll("[data-focus-id]");
   focusables.forEach((el) => {
     const isMatch = activeFocusId !== "" && el.dataset.focusId === activeFocusId;
+    const isSelected =
+      selectedFocusId !== "" && el.dataset.focusId === selectedFocusId;
     el.classList.toggle("is-focused", isMatch);
     el.classList.toggle("is-dimmed", activeFocusId !== "" && !isMatch);
+    el.classList.toggle("is-selected", isSelected);
   });
-  updateMapHud(focusLookup.get(activeFocusId) || null);
+  updateMapHud(focusLookup.get(activeFocusId) || null, selectedFocusId !== "");
+  updateDetailsSelection();
+};
+
+const selectFocusId = (focusId, options = {}) => {
+  if (!focusId || !focusLookup.has(focusId)) {
+    return;
+  }
+  const { autoScroll = false } = options;
+  selectedFocusId = focusId;
+  hoverFocusId = "";
+  updateFocusState();
+  zoomToFocus(focusId, true);
+  if (autoScroll) {
+    scrollFocusIntoView(focusId);
+  }
+};
+
+const clearSelection = (options = {}) => {
+  const { animate = true } = options;
+  if (!selectedFocusId) {
+    return;
+  }
+  selectedFocusId = "";
+  updateFocusState();
+  resetMapView(animate);
+};
+
+const cycleFocus = (direction, options = {}) => {
+  if (!focusOrder.length) {
+    return;
+  }
+  const currentId = selectedFocusId || hoverFocusId;
+  let index = focusOrder.indexOf(currentId);
+  if (index === -1) {
+    index = direction > 0 ? -1 : 0;
+  }
+  const nextIndex = (index + direction + focusOrder.length) % focusOrder.length;
+  selectFocusId(focusOrder[nextIndex], options);
 };
 
 const setupHoverFocus = () => {
   document.addEventListener("pointerover", (event) => {
+    if (selectedFocusId) {
+      return;
+    }
     const target = event.target.closest("[data-focus-id]");
     if (target) {
-      updateFocusState(target.dataset.focusId);
+      hoverFocusId = target.dataset.focusId;
+      updateFocusState();
     }
   });
 
   document.addEventListener("pointerout", (event) => {
+    if (selectedFocusId) {
+      return;
+    }
     const from = event.target.closest("[data-focus-id]");
     if (!from) {
       return;
@@ -1957,10 +2405,75 @@ const setupHoverFocus = () => {
     if (to && to.dataset.focusId === from.dataset.focusId) {
       return;
     }
-    if (to) {
-      updateFocusState(to.dataset.focusId);
-    } else {
-      updateFocusState("");
+    hoverFocusId = to ? to.dataset.focusId : "";
+    updateFocusState();
+  });
+};
+
+const setupClickFocus = () => {
+  const map = document.getElementById("system-map");
+  const strip = document.querySelector(".strip");
+  const details = document.getElementById("details");
+
+  if (map) {
+    map.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-focus-id]");
+      if (target) {
+        selectFocusId(target.dataset.focusId);
+        return;
+      }
+      clearSelection({ animate: true });
+    });
+  }
+
+  if (strip) {
+    strip.addEventListener("click", (event) => {
+      const target = event.target.closest("[data-focus-id]");
+      if (target) {
+        selectFocusId(target.dataset.focusId, { autoScroll: true });
+      }
+    });
+  }
+
+  if (details) {
+    details.addEventListener("click", (event) => {
+      const header = event.target.closest(".card-header");
+      if (!header) {
+        return;
+      }
+      const card = header.closest(".detail-card[data-focus-id]");
+      if (!card) {
+        return;
+      }
+      selectFocusId(card.dataset.focusId);
+    });
+  }
+};
+
+const setupKeyboardNavigation = () => {
+  document.addEventListener("keydown", (event) => {
+    const activeElement = document.activeElement;
+    const isTyping =
+      activeElement &&
+      (activeElement.tagName === "INPUT" ||
+        activeElement.tagName === "TEXTAREA" ||
+        activeElement.isContentEditable);
+
+    if (isTyping) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      clearSelection({ animate: true });
+      return;
+    }
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      cycleFocus(1, { autoScroll: autoScrollEnabled });
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      cycleFocus(-1, { autoScroll: autoScrollEnabled });
     }
   });
 };
@@ -1973,8 +2486,26 @@ const buildShareLink = () => {
 
 const renderSystem = (system) => {
   currentSystem = system;
-  focusLookup = new Map(system.bodies.map((body) => [body.id, body]));
+  const bodies = system.bodiesOrdered ?? system.bodies;
+  const starItems = system.starsOrdered.map((star, index) => ({
+    id: starFocusId(index),
+    typeKey: "star",
+    role: index === 0 ? "Primary star" : "Secondary star",
+    star,
+  }));
+  focusLookup = new Map(
+    [...bodies, ...starItems].map((item) => [item.id, item])
+  );
+  focusOrder = [
+    ...starItems.map((item) => item.id),
+    ...bodies.map((body) => body.id),
+  ];
   activeFocusId = "";
+  hoverFocusId = "";
+  selectedFocusId = "";
+  lastFocusId = "";
+  lastSelectedFocusId = "";
+  resetMapView(false);
 
   const primary = system.starsOrdered[0];
   const starLabel = `${system.stars.length} star${
@@ -2004,9 +2535,11 @@ const renderSystem = (system) => {
   renderMap(system);
   renderDetails(system);
   renderStrip(system);
-  updateMapHud(null);
-  setCopyStatus("Ready to copy", false);
+  updateFocusState();
+  setCopyStatus("");
   applyStarfield();
+  updateScrollTopVisibility();
+  updateStripNavVisibility();
 };
 
 const init = () => {
@@ -2015,6 +2548,14 @@ const init = () => {
   const shareButton = document.getElementById("share-link");
   const shareOutput = document.getElementById("share-output");
   const copyButton = document.getElementById("copy-system");
+  const hudPrev = document.getElementById("hud-prev");
+  const hudNext = document.getElementById("hud-next");
+  const stripPrev = document.getElementById("strip-prev");
+  const stripNext = document.getElementById("strip-next");
+  scrollTopButton = document.getElementById("scroll-top");
+  mapShellElement = document.querySelector(".map-shell");
+  stripNav = document.getElementById("strip-nav");
+  stripPanelElement = document.querySelector(".strip-panel");
 
   const params = new URLSearchParams(window.location.search);
   const seedFromUrl = params.get("seed");
@@ -2034,8 +2575,39 @@ const init = () => {
 
   generateFromInput();
   setupHoverFocus();
+  setupClickFocus();
+  setupKeyboardNavigation();
+  updateScrollTopVisibility();
+  updateStripNavVisibility();
+  window.addEventListener("scroll", updateScrollTopVisibility, {
+    passive: true,
+  });
+  window.addEventListener("resize", updateScrollTopVisibility);
+  window.addEventListener("scroll", updateStripNavVisibility, { passive: true });
+  window.addEventListener("resize", updateStripNavVisibility);
+  window.addEventListener("resize", updateStripConnector);
 
   button.addEventListener("click", generateFromInput);
+  if (hudPrev) {
+    hudPrev.addEventListener("click", () => cycleFocus(-1));
+  }
+  if (hudNext) {
+    hudNext.addEventListener("click", () => cycleFocus(1));
+  }
+  if (stripPrev) {
+    stripPrev.addEventListener("click", () => cycleFocus(-1, { autoScroll: true }));
+  }
+  if (stripNext) {
+    stripNext.addEventListener("click", () => cycleFocus(1, { autoScroll: true }));
+  }
+  if (scrollTopButton) {
+    scrollTopButton.addEventListener("click", () => {
+      const reduceMotion =
+        window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+    });
+  }
   if (shareButton) {
     shareButton.addEventListener("click", async () => {
       const url = buildShareLink();
@@ -2057,12 +2629,12 @@ const init = () => {
   if (copyButton) {
     copyButton.addEventListener("click", async () => {
       if (!currentSystem) {
-        setCopyStatus("Nothing to copy", false);
+        setCopyStatus("Nothing to copy", "error");
         return;
       }
       const text = buildSystemText(currentSystem);
       if (!text) {
-        setCopyStatus("Nothing to copy", false);
+        setCopyStatus("Nothing to copy", "error");
         return;
       }
       let copied = false;
@@ -2089,10 +2661,7 @@ const init = () => {
         }
         document.body.removeChild(textarea);
       }
-      setCopyStatus(
-        copied ? "Copied. Ready to paste." : "Copy failed. Try again.",
-        copied
-      );
+      setCopyStatus(copied ? "Copied" : "Copy failed", copied ? "success" : "error");
     });
   }
   if (seedInput) {
