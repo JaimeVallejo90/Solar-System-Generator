@@ -728,6 +728,15 @@ p {
   box-shadow: 0 0 14px rgba(103, 212, 255, 0.55);
 }
 
+.strip-body--belt.is-selected .strip-dot--main {
+  box-shadow: none;
+}
+
+.strip-body--belt.is-selected .strip-dot--belt-cluster {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--dot-color) 55%, white 45%))
+    drop-shadow(0 0 12px color-mix(in srgb, var(--dot-color) 35%, transparent));
+}
+
 .strip-body.is-selected .strip-dot-label {
   color: var(--accent);
 }
